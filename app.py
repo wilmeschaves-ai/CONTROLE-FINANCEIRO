@@ -139,7 +139,26 @@ if menu == "Lançamentos":
     if not df.empty:
         df_exibir = df.copy()
         df_exibir["Data"] = df_exibir["Data"].dt.strftime("%d/%m/%Y")
-        st.dataframe(df_exibir)
+
+        st.dataframe(df_exibir, use_container_width=True)
+
+        # ---------------
+        st.divider()
+        st.subheader("🗑️ Excluir Lançamento")
+
+        indice = st.number_input(
+            "Digite o índice do lançamento para excluir",
+            min_value=0,
+            max_value=len(df) - 1,
+            step=1,
+        )
+
+        if st.button("Excluir"):
+            df = df.drop(indice)
+            df.to_csv(ARQUIVO, index=False)
+            st.success("✅ Lançamento excluído!")
+            st.rerun()
+            # ---------------
 
 
 # =========================
