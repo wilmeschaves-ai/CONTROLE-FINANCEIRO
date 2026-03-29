@@ -20,6 +20,32 @@ if "usuario_id" not in st.session_state:
     st.session_state.usuario_id = None
 
 
+def tela_cadastro():
+    st.title("🆕 Criar Conta")
+
+    novo_usuario = st.text_input("Novo usuário")
+    nova_senha = st.text_input("Nova senha", type="password")
+
+    if st.button("Cadastrar"):
+        if not novo_usuario or not nova_senha:
+            st.warning("Preencha todos os campos")
+            return
+
+        # verifica se já existe
+        cursor.execute("SELECT id FROM usuarios WHERE usuario=?", (novo_usuario,))
+        if cursor.fetchone():
+            st.error("Usuário já existe")
+            return
+
+        cursor.execute(
+            "INSERT INTO usuarios (usuario, senha) VALUES (?, ?)",
+            (novo_usuario, nova_senha),
+        )
+        conn.commit()
+
+        st.success("✅ Usuário criado com sucesso!")
+
+
 def tela_login():
     st.title("🔐 Login")
 
@@ -59,8 +85,16 @@ if "usuario_id" not in st.session_state:
 
 
 if not st.session_state.logado:
-    tela_login()
+
+    opcao = st.radio("Escolha", ["Login", "Cadastrar"])
+
+    if opcao == "Login":
+        tela_login()
+    else:
+        tela_cadastro()
+
     st.stop()
+
 
 criar_tabelas()
 

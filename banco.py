@@ -6,10 +6,9 @@ def conectar():
 
 
 def criar_tabelas():
-    conn = conectar()
+    conn = sqlite3.connect("financeiro.db")
     cursor = conn.cursor()
 
-    # Tabela de usuários
     cursor.execute(
         """
     CREATE TABLE IF NOT EXISTS usuarios (
@@ -20,7 +19,6 @@ def criar_tabelas():
     """
     )
 
-    # Tabela de lançamentos
     cursor.execute(
         """
     CREATE TABLE IF NOT EXISTS lancamentos (
@@ -30,8 +28,7 @@ def criar_tabelas():
         tipo TEXT,
         categoria TEXT,
         descricao TEXT,
-        valor REAL,
-        FOREIGN KEY(usuario_id) REFERENCES usuarios(id)
+        valor REAL
     )
     """
     )
