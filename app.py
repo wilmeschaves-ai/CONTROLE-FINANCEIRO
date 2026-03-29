@@ -5,6 +5,92 @@ import io
 import calendar
 import altair as alt
 
+import sqlite3
+from banco import conectar, criar_tabelas
+
+
+conn = sqlite3.connect("financeiro.db", check_same_thread=False)
+cursor = conn.cursor()
+
+# SESSION STATE
+if "logado" not in st.session_state:
+    st.session_state.logado = False
+
+if "usuario_id" not in st.session_state:
+    st.session_state.usuario_id = None
+
+
+def tela_login():
+    st.title("🔐 Login")
+
+    usuario = st.text_input("Usuário")
+    senha = st.text_input("Senha", type="password")
+
+    if st.button("Entrar"):
+        cursor.execute(
+            "SELECT id FROM usuarios WHERE usuario=? AND senha=?", (usuario, senha)
+        )
+        result = cursor.fetchone()
+
+        if result:
+            st.session_state.logado = True
+            st.session_state.usuario_id = result[0]
+            st.rerun()
+        else:
+            st.error("Login inválido")
+
+
+def init_state():
+    defaults = {"logado": False, "usuario_id": None, "nome_usuario": ""}
+
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+init_state()
+
+
+if "logado" not in st.session_state:
+    st.session_state.logado = False
+
+if "usuario_id" not in st.session_state:
+    st.session_state.usuario_id = None
+
+
+if not st.session_state.logado:
+    tela_login()
+    st.stop()
+
+criar_tabelas()
+
+
+# -----------------------
+# SESSION
+# -----------------------
+def salvar_lancamento(data, tipo, categoria, descricao, valor):
+    cursor.execute(
+        """
+        INSERT INTO lancamentos (
+            usuario_id, data, tipo, categoria, descricao, valor
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+    """,
+        (st.session_state.usuario_id, data, tipo, categoria, descricao, valor),
+    )
+    conn.commit()
+
+
+def carregar_dados():
+    return pd.read_sql_query(
+        """
+        SELECT * FROM lancamentos
+        WHERE usuario_id = ?
+    """,
+        conn,
+        params=(st.session_state.usuario_id,),
+    )
+
 
 hoje = datetime.today()
 
@@ -37,33 +123,45 @@ li {
     unsafe_allow_html=True,
 )
 
+
+def moeda_br(valor):
+    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def cor_valor(valor):
+    if valor > 0:
+        return "green"
+    elif valor < 0:
+        return "red"
+    else:
+        return "gray"
+
+
 # =========================
 # CONFIG
 # =========================
 st.set_page_config(page_title="Controle Financeiro", layout="wide")
-st.title("🏠 Controle Financeiro Pessoal")
+st.title("🏠 Controle Financeiro")
+# st.title("💰 Controle Financeiro")
 
-ARQUIVO = "financas.csv"
 
-# =========================
-# CARREGAR DADOS
-# =========================
-try:
-    df = pd.read_csv(ARQUIVO)
-except:
-    df = pd.DataFrame(columns=["Data", "Tipo", "Categoria", "Descricao", "Valor"])
+df = carregar_dados()
 
 if not df.empty:
-    df["Data"] = pd.to_datetime(df["Data"], dayfirst=True, errors="coerce")
+    df["data"] = pd.to_datetime(df["data"])
+# st.dataframe(df)
 
-# =========================
-# CATEGORIAS
-# =========================
 
 # =========================
 # MENU
 # =========================
-menu = st.sidebar.radio("Menu", ["Lançamentos", "Resumo", "Análise", "Metas"])
+
+menu = st.radio(
+    "Menu",
+    ["Lançamentos", "Resumo", "Análise", "Metas"],
+    horizontal=True,
+    key="menu_principal",
+)
 
 # =========================
 # LANÇAMENTOS
@@ -90,10 +188,9 @@ if menu == "Lançamentos":
     col1, col2 = st.columns(2)
 
     with col1:
-        # data = st.date_input("Data", datetime.today())
 
         data_str = st.text_input(
-            "Data (DD/MM/AAAA)", datetime.today().strftime("%d/%m/%Y")
+            "data (DD/MM/AAAA)", datetime.today().strftime("%d/%m/%Y")
         )
 
         try:
@@ -103,42 +200,27 @@ if menu == "Lançamentos":
             st.error("❌ Data inválida! Use o formato DD/MM/AAAA")
             st.stop()
 
-        tipo = st.selectbox("Tipo", ["Receita", "Despesa"])
+        tipo = st.selectbox("tipo", ["Receita", "Despesa"])
 
     with col2:
 
-        categoria = st.selectbox("Categoria", categorias[tipo])
+        categoria = st.selectbox("categoria", categorias[tipo])
 
-        valor = st.number_input("Valor", min_value=0.0, format="%.2f")
+        valor = st.number_input("valor", min_value=0.0, format="%.2f")
 
-    descricao = st.text_input("Descrição")
+        descricao = st.text_input("Descrição")
 
     if st.button("Salvar"):
-        data_formatada = pd.to_datetime(data).strftime("%d/%m/%Y")
-
-        novo = pd.DataFrame(
-            [
-                {
-                    "Data": pd.to_datetime(data),
-                    "Tipo": tipo,
-                    "Categoria": categoria,
-                    "Descricao": descricao,
-                    "Valor": valor,
-                }
-            ]
-        )
-
-        df = pd.concat([df, novo], ignore_index=True)
-        df.to_csv(ARQUIVO, index=False)
-
+        salvar_lancamento(data.strftime("%Y-%m-%d"), tipo, categoria, descricao, valor)
         st.success("✅ Lançamento salvo!")
+        st.rerun()
 
     st.divider()
     st.subheader("📋 Histórico")
 
     if not df.empty:
         df_exibir = df.copy()
-        df_exibir["Data"] = df_exibir["Data"].dt.strftime("%d/%m/%Y")
+        df_exibir["data"] = df_exibir["data"].dt.strftime("%d/%m/%Y")
 
         st.dataframe(df_exibir, use_container_width=True)
 
@@ -146,99 +228,122 @@ if menu == "Lançamentos":
         st.divider()
         st.subheader("🗑️ Excluir Lançamento")
 
-        indice = st.number_input(
-            "Digite o índice do lançamento para excluir",
-            min_value=0,
-            max_value=len(df) - 1,
-            step=1,
+        st.write("Selecione o lançamento para excluir:")
+
+        selecao = st.selectbox(
+            "Escolha o lançamento",
+            df_exibir.index,
+            format_func=lambda x: f"{df_exibir.loc[x, 'data']} | {df_exibir.loc[x, 'categoria']} | R$ {df_exibir.loc[x, 'valor']:.2f}",
         )
 
         if st.button("Excluir"):
-            df = df.drop(indice)
-            df.to_csv(ARQUIVO, index=False)
+            df = df.drop(selecao)
             st.success("✅ Lançamento excluído!")
             st.rerun()
-            # ---------------
-
 
 # =========================
 # RESUMO
 # =========================
+
 elif menu == "Resumo":
 
-    st.subheader("📊 Visão Geral")
+    st.subheader("📊 Resumo")
 
+    # 🔥 FILTRO AQUI (logo abaixo do título)
     col1, col2 = st.columns(2)
-    with col1:
 
-        # ------------------
+    meses = {
+        1: "Janeiro",
+        2: "Fevereiro",
+        3: "Março",
+        4: "Abril",
+        5: "Maio",
+        6: "Junho",
+        7: "Julho",
+        8: "Agosto",
+        9: "Setembro",
+        10: "Outubro",
+        11: "Novembro",
+        12: "Dezembro",
+    }
 
-        hoje = datetime.today()
+    mes_num = col1.selectbox(
+        "Mês",
+        list(meses.keys()),
+        format_func=lambda x: meses[x],
+        index=datetime.today().month - 1,
+    )
 
-        meses = {
-            1: "Janeiro",
-            2: "Fevereiro",
-            3: "Março",
-            4: "Abril",
-            5: "Maio",
-            6: "Junho",
-            7: "Julho",
-            8: "Agosto",
-            9: "Setembro",
-            10: "Outubro",
-            11: "Novembro",
-            12: "Dezembro",
-        }
+    ano = col2.selectbox(
+        "Ano",
+        list(range(2020, datetime.today().year + 5)),
+        index=datetime.today().year - 2020,
+    )
 
-        mes_num = st.selectbox(
-            "Mês",
-            list(meses.keys()),
-            format_func=lambda x: meses[x],
-            index=hoje.month - 1,
-        )
-        # mes = st.selectbox("Mês", list(range(1, 13)), index=hoje.month - 1)
-        # ------------------
+    # 🔽 DEPOIS vem os cálculos
+    df["data"] = pd.to_datetime(df["data"], errors="coerce")
 
-    with col2:
-        # ano = st.selectbox("Ano", [2024, 2025, 2026])
-        # ------------------
-        anos = list(range(2020, hoje.year + 5))
+    # df_filtrado = df[(df["data"].dt.month == mes_num) & (df["data"].dt.year == ano)]
 
-        ano = st.selectbox("Ano", anos, index=anos.index(hoje.year))
+    df_filtrado = df[(df["data"].dt.month == mes_num) & (df["data"].dt.year == ano)]
 
-        # ------------------
+    # 👇 AQUI ENTRA O df_exibir
+    df_exibir = df_filtrado.copy()
 
-    if not df.empty:
+    df_exibir["valor"] = df_exibir["valor"].apply(moeda_br)
+    df_exibir["data"] = df_exibir["data"].dt.strftime("%d/%m/%Y")
 
-        df_filtrado = df[(df["Data"].dt.month == mes_num) & (df["Data"].dt.year == ano)]
+    # 👇 MOSTRA FORMATADO
+    st.dataframe(df_exibir, use_container_width=True)
 
-        receitas = df_filtrado[df_filtrado["Tipo"] == "Receita"]["Valor"].sum()
-        despesas = df_filtrado[df_filtrado["Tipo"] == "Despesa"]["Valor"].sum()
-        saldo = receitas - despesas
+    # df_exibir = df_filtrado.copy()
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("💰 Receitas", f"R$ {receitas:,.2f}")
-        c2.metric("💸 Despesas", f"R$ {despesas:,.2f}")
-        c3.metric("Saldo", f"R$ {saldo:,.2f}")
+    st.write("Linhas filtradas:", len(df_filtrado))
+    # st.write(df_filtrado)
+    receitas = df_filtrado[df_filtrado["tipo"] == "Receita"]["valor"].sum()
+    despesas = df_filtrado[df_filtrado["tipo"] == "Despesa"]["valor"].sum()
+    saldo = receitas - despesas
 
-        if despesas > receitas:
-            st.error("⚠️ Você gastou mais do que ganhou!")
+    st.markdown(
+        f"""
+    💰 Receitas: <span style='color:{cor_valor(receitas)}; font-size:20px'>
+    {moeda_br(receitas)}
+    </span>
+    """,
+        unsafe_allow_html=True,
+    )
 
-        # EXPORTAR EXCEL
-        st.divider()
-        st.subheader("📥 Exportar")
+    st.markdown(
+        f"""
+    💸 Despesas: <span style='color:{cor_valor(despesas)}; font-size:20px'>
+    {moeda_br(despesas)}
+    </span>
+    """,
+        unsafe_allow_html=True,
+    )
 
-        buffer = io.BytesIO()
-        df_filtrado.to_excel(buffer, index=False, engine="openpyxl")
-        buffer.seek(0)
+    st.markdown(
+        f"""
+    📊 Saldo: <span style='color:{cor_valor(saldo)}; font-size:22px; font-weight:bold'>
+    {moeda_br(saldo)}
+    </span>
+    """,
+        unsafe_allow_html=True,
+    )
 
-        st.download_button(
-            label="📊 Baixar Excel do mês",
-            data=buffer,
-            file_name=f"financeiro_{mes_num}_{ano}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+    st.divider()
+    st.subheader("📥 Exportar")
 
+    buffer = io.BytesIO()
+    df_filtrado.to_excel(buffer, index=False, engine="openpyxl")
+    buffer.seek(0)
+
+    st.download_button(
+        label="📊 Baixar Excel do mês",
+        data=buffer,
+        file_name=f"financeiro_{mes_num}_{ano}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 # =========================
 # ANÁLISE
 # =========================
@@ -247,15 +352,15 @@ elif menu == "Análise":
     st.subheader("📈 Para onde vai seu dinheiro")
 
     if not df.empty:
-        despesas_df = df[df["Tipo"] == "Despesa"]
+        despesas_df = df[df["tipo"] == "Despesa"]
 
         if not despesas_df.empty:
-            resumo = despesas_df.groupby("Categoria")["Valor"].sum()
+            resumo = despesas_df.groupby("categoria")["valor"].sum()
 
             chart = (
                 alt.Chart(resumo.reset_index())
                 .mark_bar(color="#6BAED6")  # azul suave
-                .encode(x="Categoria", y="Valor")
+                .encode(x="categoria", y="valor")
             )
 
             st.altair_chart(chart, use_container_width=True)
@@ -273,8 +378,8 @@ elif menu == "Metas":
     meta = st.number_input("Meta mensal (R$)", min_value=0.0)
 
     if not df.empty:
-        receitas = df[df["Tipo"] == "Receita"]["Valor"].sum()
-        despesas = df[df["Tipo"] == "Despesa"]["Valor"].sum()
+        receitas = df[df["tipo"] == "Receita"]["valor"].sum()
+        despesas = df[df["tipo"] == "Despesa"]["valor"].sum()
         saldo = receitas - despesas
 
         st.write(f"Saldo atual: R$ {saldo:,.2f}")
