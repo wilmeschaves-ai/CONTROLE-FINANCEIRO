@@ -137,6 +137,17 @@ def cor_valor(valor):
         return "gray"
 
 
+def valor_colorido(v, tipo):
+    if tipo == "Receita":
+        cor = "#22c55e"  # verde
+    elif tipo == "Despesa":
+        cor = "#ef4444"  # vermelho
+    else:
+        cor = "#9ca3af"  # cinza
+
+    return f'<span style="color:{cor}; font-weight:bold">{moeda_br(v)}</span>'
+
+
 # =========================
 # CONFIG
 # =========================
@@ -288,14 +299,26 @@ elif menu == "Resumo":
     df_filtrado = df[(df["data"].dt.month == mes_num) & (df["data"].dt.year == ano)]
 
     # 👇 AQUI ENTRA O df_exibir
+
     df_exibir = df_filtrado.copy()
 
-    df_exibir["valor"] = df_exibir["valor"].apply(moeda_br)
+    df_exibir["valor"] = df_exibir.apply(
+        lambda row: valor_colorido(row["valor"], row["tipo"]), axis=1
+    )
+
+    # df_exibir["valor"] = df_exibir["valor"].apply(moeda_br)
     df_exibir["data"] = df_exibir["data"].dt.strftime("%d/%m/%Y")
 
-    # 👇 MOSTRA FORMATADO
-    st.dataframe(df_exibir, use_container_width=True)
+    categorias_unicas = ["Todas"] + sorted(df_filtrado["categoria"].dropna().unique())
 
+    categoria_filtro = st.selectbox("Filtrar por categoria", categorias_unicas)
+
+    if categoria_filtro != "Todas":
+        df_filtrado = df_filtrado[df_filtrado["categoria"] == categoria_filtro]
+
+    # 👇 MOSTRA FORMATADO
+    # st.dataframe(df_exibir, use_container_width=True)
+    st.write(df_exibir.to_html(escape=False, index=False), unsafe_allow_html=True)
     # df_exibir = df_filtrado.copy()
 
     st.write("Linhas filtradas:", len(df_filtrado))
