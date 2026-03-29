@@ -185,7 +185,19 @@ def valor_colorido(v, tipo):
 # =========================
 # CONFIG
 # =========================
+
+# st.markdown(
+#    """
+#    <div style="text-align: center;">
+#        <img src="logo.png" width="120">
+#        <h1>Controle Financeiro</h1>
+#    </div>
+#    """,
+#    unsafe_allow_html=True,
+# )
+
 st.set_page_config(page_title="Controle Financeiro", layout="wide")
+st.image("logo.png", width=200)
 st.title("🏠 Controle Financeiro")
 # st.title("💰 Controle Financeiro")
 

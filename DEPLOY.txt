@@ -1,0 +1,92 @@
+# 🚀 PASSO A PASSO DEPLOY STREAMLIT + GITHUB
+
+## 📌 1. IR PARA A PASTA DO PROJETO
+
+cd "E:\PYTHON VII\FINANÇAS PESSOAIS WEB"
+
+---
+
+## 📌 2. VERIFICAR STATUS
+
+git status
+
+---
+
+## 📌 3. ADICIONAR ALTERAÇÕES
+
+git add .
+
+---
+
+## 📌 4. CRIAR COMMIT
+
+git commit -m "Atualização sistema financeiro"
+
+---
+
+## 📌 5. ENVIAR PARA O GITHUB
+
+git push
+
+---
+
+## 📌 6. (SE DER ERRO DE UPSTREAM - PRIMEIRA VEZ)
+
+git push -u origin main
+OU
+git push -u origin master
+
+---
+
+## 📌 7. FORÇAR ATUALIZAÇÃO (SE NECESSÁRIO)
+
+git commit --allow-empty -m "forçar deploy"
+git push
+
+---
+
+# 🌐 8. ATUALIZAR NO STREAMLIT
+
+Acessar o Streamlit Cloud
+
+Clicar em:
+
+* Reboot app
+  OU
+* Manage app → Redeploy
+
+---
+
+# ⚠️ PROBLEMAS COMUNS
+
+## ❌ "nothing to commit"
+
+→ Nenhuma alteração foi feita
+
+## ❌ "not a git repository"
+
+→ Rode:
+git init
+
+## ❌ erro banco.py
+
+→ Verificar se arquivo está no GitHub
+
+## ❌ dados sumindo
+
+→ SQLite não persiste online (normal)
+
+---
+
+# 📦 EXTRA (PRIMEIRA CONFIGURAÇÃO)
+
+git config --global user.name "Seu Nome"
+git config --global user.email "[seuemail@gmail.com](mailto:seuemail@gmail.com)"
+
+---
+
+# ✅ CHECK FINAL
+
+✔ Código atualizado no GitHub
+✔ App reiniciado no Streamlit
+✔ Sistema funcionando online
