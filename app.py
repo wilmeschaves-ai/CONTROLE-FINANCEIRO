@@ -12,6 +12,8 @@ from banco import conectar, criar_tabelas
 conn = sqlite3.connect("financeiro.db", check_same_thread=False)
 cursor = conn.cursor()
 
+criar_tabelas()
+
 # SESSION STATE
 if "logado" not in st.session_state:
     st.session_state.logado = False
@@ -96,21 +98,76 @@ if not st.session_state.logado:
     st.stop()
 
 
-criar_tabelas()
+def adicionar_coluna_se_nao_existir():
+    cursor.execute("PRAGMA table_info(lancamentos)")
+    colunas = [col[1] for col in cursor.fetchall()]
+
+    if "forma_pagamento" not in colunas:
+        cursor.execute("ALTER TABLE lancamentos ADD COLUMN forma_pagamento TEXT")
+        conn.commit()
+
+
+adicionar_coluna_se_nao_existir()
 
 
 # -----------------------
 # SESSION
 # -----------------------
-def salvar_lancamento(data, tipo, categoria, descricao, valor):
+def salvar_lancamento(data, tipo, categoria, descricao, valor, forma_pagamento):
     cursor.execute(
         """
         INSERT INTO lancamentos (
-            usuario_id, data, tipo, categoria, descricao, valor
+            usuario_id, data, tipo, categoria, descricao, valor, forma_pagamento
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
     """,
-        (st.session_state.usuario_id, data, tipo, categoria, descricao, valor),
+        (
+            st.session_state.usuario_id,
+            data,
+            tipo,
+            categoria,
+            descricao,
+            valor,
+            forma_pagamento,
+        ),
+    )
+    conn.commit()
+
+
+def atualizar_lancamento(
+    id_lancamento, data, tipo, categoria, descricao, valor, forma_pagamento
+):
+    cursor.execute(
+        """
+        UPDATE lancamentos
+        SET data = ?,
+            tipo = ?,
+            categoria = ?,
+            descricao = ?,
+            valor = ?,
+            forma_pagamento = ?
+        WHERE id = ? AND usuario_id = ?
+    """,
+        (
+            data,
+            tipo,
+            categoria,
+            descricao,
+            valor,
+            forma_pagamento,
+            id_lancamento,
+            st.session_state.usuario_id,
+        ),
+    )
+
+    conn.commit()
+
+
+# 👇 COLOQUE AQUI
+def excluir_lancamento(id_lancamento):
+    cursor.execute(
+        "DELETE FROM lancamentos WHERE id = ? AND usuario_id = ?",
+        (id_lancamento, st.session_state.usuario_id),
     )
     conn.commit()
 
@@ -159,7 +216,7 @@ li {
 
 
 def moeda_br(valor):
-    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f" {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 def cor_valor(valor):
@@ -182,50 +239,54 @@ def valor_colorido(v, tipo):
     return f'<span style="color:{cor}; font-weight:bold">{moeda_br(v)}</span>'
 
 
+def card(titulo, valor, cor):
+    return f"""
+    <div style="
+        background: linear-gradient(135deg, #1f2937, #111827);
+        padding:20px;
+        border-radius:15px;
+        text-align:center;
+        box-shadow: 0px 6px 15px rgba(0,0,0,0.4);
+    ">
+        <h4 style="color:#9ca3af;">{titulo}</h4>
+        <h2 style="color:{cor}; margin-top:10px;">{valor}</h2>
+    </div>
+    """
+
+
 # =========================
 # CONFIG
 # =========================
 
-# st.markdown(
-#    """
-#    <div style="text-align: center;">
-#        <img src="logo.png" width="120">
-#        <h1>Controle Financeiro</h1>
-#    </div>
-#    """,
-#    unsafe_allow_html=True,
-# )
+col1, col2, col3 = st.columns([1, 2, 1])
 
-st.set_page_config(page_title="Controle Financeiro", layout="wide")
-st.image("logo.png", width=200)
-st.title("🏠 Controle Financeiro")
-# st.title("💰 Controle Financeiro")
+with col2:
+    st.image("logo.png", width=180)
+
+st.markdown(
+    "<h1 style='text-align:center;'>💰 Controle Financeiro</h1>", unsafe_allow_html=True
+)
 
 
 df = carregar_dados()
 
 if not df.empty:
     df["data"] = pd.to_datetime(df["data"])
-# st.dataframe(df)
 
 
 # =========================
 # MENU
 # =========================
 
-menu = st.radio(
-    "Menu",
-    ["Lançamentos", "Resumo", "Análise", "Metas"],
-    horizontal=True,
-    key="menu_principal",
-)
+menu = st.selectbox("📌 Navegação", ["Lançamentos", "Resumo", "Análise", "Metas"])
+
 
 # =========================
 # LANÇAMENTOS
 # =========================
 
 categorias = {
-    "Receita": ["Salário", "Extra"],
+    "Receita": ["Salário", "Extra", "Empréstimo", "Outros"],
     "Despesa": [
         "Aluguel",
         "Luz",
@@ -235,24 +296,24 @@ categorias = {
         "Transporte",
         "Lazer",
         "Saúde",
+        "Educação",
+        "Empréstimos",
+        "Dízimo",
         "Outros",
     ],
 }
-
 if menu == "Lançamentos":
     st.subheader("➕ Novo Lançamento")
 
     col1, col2 = st.columns(2)
 
     with col1:
-
         data_str = st.text_input(
             "data (DD/MM/AAAA)", datetime.today().strftime("%d/%m/%Y")
         )
 
         try:
             data = pd.to_datetime(data_str, dayfirst=True)
-
         except:
             st.error("❌ Data inválida! Use o formato DD/MM/AAAA")
             st.stop()
@@ -260,19 +321,39 @@ if menu == "Lançamentos":
         tipo = st.selectbox("tipo", ["Receita", "Despesa"])
 
     with col2:
-
         categoria = st.selectbox("categoria", categorias[tipo])
-
         valor = st.number_input("valor", min_value=0.0, format="%.2f")
-
         descricao = st.text_input("Descrição")
 
-    if st.button("Salvar"):
-        salvar_lancamento(data.strftime("%Y-%m-%d"), tipo, categoria, descricao, valor)
+        forma_pagamento = None
+        if tipo == "Despesa" or tipo == "Receita":
+            forma_pagamento = st.selectbox(
+                "Forma de pagamento/Recebimento",
+                [
+                    "Dinheiro",
+                    "Pix",
+                    "Cartão de Débito",
+                    "Cartão de Crédito",
+                    "Crédito em Conta" "Empréstimo",
+                ],
+            )
+
+        # 👇 BOTÃO FORA DAS COLUNAS
+        st.divider()
+
+    if st.button("💾 Salvar"):
+        salvar_lancamento(
+            data.strftime("%Y-%m-%d"),
+            tipo,
+            categoria,
+            descricao,
+            valor,
+            forma_pagamento,
+        )
+
         st.success("✅ Lançamento salvo!")
         st.rerun()
 
-    st.divider()
     st.subheader("📋 Histórico")
 
     if not df.empty:
@@ -287,16 +368,106 @@ if menu == "Lançamentos":
 
         st.write("Selecione o lançamento para excluir:")
 
+        df_exibir["label"] = df_exibir.apply(
+            lambda row: f"{row['data']} | {row['categoria']} | {row['valor']:.2f}",
+            axis=1,
+        )
+
         selecao = st.selectbox(
             "Escolha o lançamento",
-            df_exibir.index,
-            format_func=lambda x: f"{df_exibir.loc[x, 'data']} | {df_exibir.loc[x, 'categoria']} | R$ {df_exibir.loc[x, 'valor']:.2f}",
+            df_exibir["id"],
+            format_func=lambda x: df_exibir[df_exibir["id"] == x]["label"].values[0],
         )
 
         if st.button("Excluir"):
-            df = df.drop(selecao)
+            excluir_lancamento(selecao)
             st.success("✅ Lançamento excluído!")
             st.rerun()
+
+        # =======================================
+        st.subheader("✏️ Editar Lançamento")
+
+        if not df.empty:
+
+            df_edit = df.copy()
+
+            df_edit["label"] = df_edit.apply(
+                lambda row: f"{row['data'].strftime('%d/%m/%Y')} | {row['categoria']} | R$ {row['valor']:.2f}",
+                axis=1,
+            )
+
+            lancamento_id = st.selectbox(
+                "Selecione o lançamento",
+                df_edit["id"],
+                format_func=lambda x: df_edit[df_edit["id"] == x]["label"].values[0],
+            )
+
+            lancamento = df_edit[df_edit["id"] == lancamento_id].iloc[0]
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                nova_data = st.text_input(
+                    "Data", lancamento["data"].strftime("%d/%m/%Y")
+                )
+
+                novo_tipo = st.selectbox(
+                    "Tipo",
+                    ["Receita", "Despesa"],
+                    index=0 if lancamento["tipo"] == "Receita" else 1,
+                )
+
+                nova_categoria = st.text_input("Categoria", lancamento["categoria"])
+
+            with col2:
+                novo_valor = st.number_input("Valor", value=float(lancamento["valor"]))
+
+                nova_descricao = st.text_input("Descrição", lancamento["descricao"])
+                # ==================================
+                opcoes_pagamento = [
+                    "Dinheiro",
+                    "Pix",
+                    "Cartão de Débito",
+                    "Cartão de Crédito",
+                    "Crédito em Conta",
+                ]
+
+                valor_atual = lancamento["forma_pagamento"]
+
+                # garante valor válido mesmo se for None ou vazio
+                if valor_atual not in opcoes_pagamento:
+                    valor_atual = opcoes_pagamento[0]
+
+                nova_forma = st.selectbox(
+                    "Forma de pagamento",
+                    opcoes_pagamento,
+                    index=opcoes_pagamento.index(valor_atual),
+                )
+                # ==================================
+            if st.button("💾 Atualizar Lançamento"):
+
+                try:
+                    nova_data = st.date_input("Data", value=lancamento["data"].date())
+
+                    data_final = nova_data.strftime("%Y-%m-%d")
+                    atualizar_lancamento(
+                        lancamento_id,
+                        data_final,
+                        novo_tipo,
+                        nova_categoria,
+                        nova_descricao,
+                        novo_valor,
+                        nova_forma,
+                    )
+
+                    st.success("✅ Lançamento atualizado com sucesso!")
+                    st.rerun()
+
+                except:
+                    # st.error("❌ Data inválida! Use DD/MM/AAAA")
+                    pass
+        # =======================================
+
 
 # =========================
 # RESUMO
@@ -340,11 +511,17 @@ elif menu == "Resumo":
     # 🔽 DEPOIS vem os cálculos
     df["data"] = pd.to_datetime(df["data"], errors="coerce")
 
-    # df_filtrado = df[(df["data"].dt.month == mes_num) & (df["data"].dt.year == ano)]
-
     df_filtrado = df[(df["data"].dt.month == mes_num) & (df["data"].dt.year == ano)]
+    df_filtrado = df_filtrado.copy()
+    categorias_unicas = ["Todas"] + sorted(df_filtrado["categoria"].dropna().unique())
+    categoria_filtro = st.selectbox("Filtrar por categoria", categorias_unicas)
 
     # 👇 AQUI ENTRA O df_exibir
+
+    # df_exibir = df_filtrado.copy()
+
+    if categoria_filtro != "Todas":
+        df_filtrado = df_filtrado[df_filtrado["categoria"] == categoria_filtro]
 
     df_exibir = df_filtrado.copy()
 
@@ -352,23 +529,12 @@ elif menu == "Resumo":
         lambda row: valor_colorido(row["valor"], row["tipo"]), axis=1
     )
 
-    # df_exibir["valor"] = df_exibir["valor"].apply(moeda_br)
     df_exibir["data"] = df_exibir["data"].dt.strftime("%d/%m/%Y")
 
-    categorias_unicas = ["Todas"] + sorted(df_filtrado["categoria"].dropna().unique())
-
-    categoria_filtro = st.selectbox("Filtrar por categoria", categorias_unicas)
-
-    if categoria_filtro != "Todas":
-        df_filtrado = df_filtrado[df_filtrado["categoria"] == categoria_filtro]
-
     # 👇 MOSTRA FORMATADO
-    # st.dataframe(df_exibir, use_container_width=True)
     st.write(df_exibir.to_html(escape=False, index=False), unsafe_allow_html=True)
-    # df_exibir = df_filtrado.copy()
 
     st.write("Linhas filtradas:", len(df_filtrado))
-    # st.write(df_filtrado)
     receitas = df_filtrado[df_filtrado["tipo"] == "Receita"]["valor"].sum()
     despesas = df_filtrado[df_filtrado["tipo"] == "Despesa"]["valor"].sum()
     saldo = receitas - despesas
