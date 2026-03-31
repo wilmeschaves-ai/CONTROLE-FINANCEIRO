@@ -6,7 +6,7 @@ def conectar():
 
 
 def criar_tabelas():
-    conn = sqlite3.connect("financeiro.db")
+    conn = conectar()
     cursor = conn.cursor()
 
     cursor.execute(
@@ -14,7 +14,8 @@ def criar_tabelas():
     CREATE TABLE IF NOT EXISTS usuarios (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         usuario TEXT UNIQUE,
-        senha TEXT
+        senha TEXT,
+        tipo TEXT DEFAULT 'usuario'
     )
     """
     )
@@ -28,10 +29,25 @@ def criar_tabelas():
         tipo TEXT,
         categoria TEXT,
         descricao TEXT,
-        valor REAL
+        valor REAL,
+        forma_pagamento TEXT
     )
     """
     )
 
     conn.commit()
+    conn.close()
+
+
+def adicionar_coluna_feedback():
+    conn = conectar()
+    cursor = conn.cursor()
+
+    cursor.execute("PRAGMA table_info(usuarios)")
+    colunas = [col[1] for col in cursor.fetchall()]
+
+    if "satisfacao" not in colunas:
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN satisfacao TEXT")
+        conn.commit()
+
     conn.close()
