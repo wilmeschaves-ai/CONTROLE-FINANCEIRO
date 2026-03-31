@@ -1,211 +1,31 @@
 import streamlit as st
-import pandas as pd
-from datetime import datetime
-import io
-import calendar
-import altair as alt
+from banco import criar_tabelas
+from auth import login, cadastrar
+from banco import conectar, adicionar_coluna_feedback
 
-import sqlite3
-from banco import conectar, criar_tabelas
+import qrcode
+from io import BytesIO
 
-
-conn = sqlite3.connect("financeiro.db", check_same_thread=False)
-cursor = conn.cursor()
-
-criar_tabelas()
-
-# SESSION STATE
-if "logado" not in st.session_state:
-    st.session_state.logado = False
-
-if "usuario_id" not in st.session_state:
-    st.session_state.usuario_id = None
-
-
-def tela_cadastro():
-    st.title("🆕 Criar Conta")
-
-    novo_usuario = st.text_input("Novo usuário")
-    nova_senha = st.text_input("Nova senha", type="password")
-
-    if st.button("Cadastrar"):
-        if not novo_usuario or not nova_senha:
-            st.warning("Preencha todos os campos")
-            return
-
-        # verifica se já existe
-        cursor.execute("SELECT id FROM usuarios WHERE usuario=?", (novo_usuario,))
-        if cursor.fetchone():
-            st.error("Usuário já existe")
-            return
-
-        cursor.execute(
-            "INSERT INTO usuarios (usuario, senha) VALUES (?, ?)",
-            (novo_usuario, nova_senha),
-        )
-        conn.commit()
-
-        st.success("✅ Usuário criado com sucesso!")
-
-
-def tela_login():
-    st.title("🔐 Login")
-
-    usuario = st.text_input("Usuário")
-    senha = st.text_input("Senha", type="password")
-
-    if st.button("Entrar"):
-        cursor.execute(
-            "SELECT id FROM usuarios WHERE usuario=? AND senha=?", (usuario, senha)
-        )
-        result = cursor.fetchone()
-
-        if result:
-            st.session_state.logado = True
-            st.session_state.usuario_id = result[0]
-            st.rerun()
-        else:
-            st.error("Login inválido")
-
-
-def init_state():
-    defaults = {"logado": False, "usuario_id": None, "nome_usuario": ""}
-
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
-
-
-init_state()
-
-
-if "logado" not in st.session_state:
-    st.session_state.logado = False
-
-if "usuario_id" not in st.session_state:
-    st.session_state.usuario_id = None
-
-
-if not st.session_state.logado:
-
-    opcao = st.radio("Escolha", ["Login", "Cadastrar"])
-
-    if opcao == "Login":
-        tela_login()
-    else:
-        tela_cadastro()
-
-    st.stop()
-
-
-def adicionar_coluna_se_nao_existir():
-    cursor.execute("PRAGMA table_info(lancamentos)")
-    colunas = [col[1] for col in cursor.fetchall()]
-
-    if "forma_pagamento" not in colunas:
-        cursor.execute("ALTER TABLE lancamentos ADD COLUMN forma_pagamento TEXT")
-        conn.commit()
-
-
-adicionar_coluna_se_nao_existir()
-
-
-# -----------------------
-# SESSION
-# -----------------------
-def salvar_lancamento(data, tipo, categoria, descricao, valor, forma_pagamento):
-    cursor.execute(
-        """
-        INSERT INTO lancamentos (
-            usuario_id, data, tipo, categoria, descricao, valor, forma_pagamento
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """,
-        (
-            st.session_state.usuario_id,
-            data,
-            tipo,
-            categoria,
-            descricao,
-            valor,
-            forma_pagamento,
-        ),
-    )
-    conn.commit()
-
-
-def atualizar_lancamento(
-    id_lancamento, data, tipo, categoria, descricao, valor, forma_pagamento
-):
-    cursor.execute(
-        """
-        UPDATE lancamentos
-        SET data = ?,
-            tipo = ?,
-            categoria = ?,
-            descricao = ?,
-            valor = ?,
-            forma_pagamento = ?
-        WHERE id = ? AND usuario_id = ?
-    """,
-        (
-            data,
-            tipo,
-            categoria,
-            descricao,
-            valor,
-            forma_pagamento,
-            id_lancamento,
-            st.session_state.usuario_id,
-        ),
-    )
-
-    conn.commit()
-
-
-# 👇 COLOQUE AQUI
-def excluir_lancamento(id_lancamento):
-    cursor.execute(
-        "DELETE FROM lancamentos WHERE id = ? AND usuario_id = ?",
-        (id_lancamento, st.session_state.usuario_id),
-    )
-    conn.commit()
-
-
-def carregar_dados():
-    return pd.read_sql_query(
-        """
-        SELECT * FROM lancamentos
-        WHERE usuario_id = ?
-    """,
-        conn,
-        params=(st.session_state.usuario_id,),
-    )
-
-
-hoje = datetime.today()
 
 st.markdown(
     """
 <style>
 
-/* Selectbox (dropdown) */
-div[data-baseweb="select"] > div {
+/* Forçar cursor de clique */
+button, 
+.stButton > button,
+[data-baseweb="select"],
+[data-baseweb="select"] * {
     cursor: pointer !important;
 }
 
-/* Área clicável do select */
-div[data-baseweb="select"] {
-    cursor: pointer !important;
+/* Inputs também */
+input, textarea {
+    cursor: text !important;
 }
 
-/* Opções dentro do dropdown */
-ul {
-    cursor: pointer !important;
-}
-
-/* Itens da lista */
-li {
+/* Selectbox dropdown */
+ul, li {
     cursor: pointer !important;
 }
 
@@ -215,411 +35,232 @@ li {
 )
 
 
-def moeda_br(valor):
-    return f" {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+# ========GERAR QR CODE PIX========
+import qrcode
+from io import BytesIO
+import streamlit as st
 
-
-def cor_valor(valor):
-    if valor > 0:
-        return "green"
-    elif valor < 0:
-        return "red"
-    else:
-        return "gray"
-
-
-def valor_colorido(v, tipo):
-    if tipo == "Receita":
-        cor = "#22c55e"  # verde
-    elif tipo == "Despesa":
-        cor = "#ef4444"  # vermelho
-    else:
-        cor = "#9ca3af"  # cinza
-
-    return f'<span style="color:{cor}; font-weight:bold">{moeda_br(v)}</span>'
-
-
-def card(titulo, valor, cor):
-    return f"""
-    <div style="
-        background: linear-gradient(135deg, #1f2937, #111827);
-        padding:20px;
-        border-radius:15px;
-        text-align:center;
-        box-shadow: 0px 6px 15px rgba(0,0,0,0.4);
-    ">
-        <h4 style="color:#9ca3af;">{titulo}</h4>
-        <h2 style="color:{cor}; margin-top:10px;">{valor}</h2>
-    </div>
-    """
-
-
-# =========================
-# CONFIG
-# =========================
 
 col1, col2, col3 = st.columns([1, 2, 1])
 
 with col2:
-    st.image("logo.png", width=180)
+    st.image("logo.png", width=280)
 
 st.markdown(
     "<h1 style='text-align:center;'>💰 Controle Financeiro</h1>", unsafe_allow_html=True
 )
 
 
-df = carregar_dados()
+# =========================
+# GERAR PIX (CÓDIGO COPIA E COLA)
+# =========================
+def crc16(payload):
+    polinomio = 0x1021
+    resultado = 0xFFFF
 
-if not df.empty:
-    df["data"] = pd.to_datetime(df["data"])
+    for byte in payload.encode():
+        resultado ^= byte << 8
+        for _ in range(8):
+            if resultado & 0x8000:
+                resultado = (resultado << 1) ^ polinomio
+            else:
+                resultado <<= 1
+            resultado &= 0xFFFF
+
+    return format(resultado, "04X")
+
+
+def gerar_payload_pix(chave, nome, cidade):
+    nome = nome[:25]
+    cidade = cidade[:15]
+
+    payload = (
+        "000201"
+        "26"
+        + f"{len('0014BR.GOV.BCB.PIX01' + f'{len(chave):02}{chave}'):02}"
+        + "0014BR.GOV.BCB.PIX"
+        + f"01{len(chave):02}{chave}"
+        + "52040000"
+        "5303986"
+        "5802BR" + f"59{len(nome):02}{nome}" + f"60{len(cidade):02}{cidade}"
+        "62070503***"
+        "6304"
+    )
+
+    payload += crc16(payload)
+    return payload
+
+
+def gerar_qr_pix(payload):
+    qr = qrcode.make(payload)
+    buffer = BytesIO()
+    qr.save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer
 
 
 # =========================
-# MENU
+# EXIBIR NO APP
 # =========================
 
-menu = st.selectbox("📌 Navegação", ["Lançamentos", "Resumo", "Análise", "Metas"])
+payload = gerar_payload_pix(
+    chave="wilmeschaves@gmail.com", nome="WILMES CHAVES", cidade="ARAPIRACA"
+)
+
+qr_img = gerar_qr_pix(payload)
+st.divider()
 
 
-# =========================
-# LANÇAMENTOS
-# =========================
+st.markdown(
+    "<h3 style='text-align:center;'>💖 Apoie este projeto</h3>", unsafe_allow_html=True
+)
 
-categorias = {
-    "Receita": ["Salário", "Extra", "Empréstimo", "Outros"],
-    "Despesa": [
-        "Aluguel",
-        "Luz",
-        "Água",
-        "Internet",
-        "Mercado",
-        "Transporte",
-        "Lazer",
-        "Saúde",
-        "Educação",
-        "Empréstimos",
-        "Dízimo",
-        "Outros",
-    ],
-}
-if menu == "Lançamentos":
-    st.subheader("➕ Novo Lançamento")
+st.markdown(
+    "<p style='text-align:center;'>Escaneie o QR Code para contribuir 🙌</p>",
+    unsafe_allow_html=True,
+)
 
-    col1, col2 = st.columns(2)
+# CENTRALIZA O QR
+col1, col2, col3 = st.columns([2, 1, 2])
 
-    with col1:
-        data_str = st.text_input(
-            "data (DD/MM/AAAA)", datetime.today().strftime("%d/%m/%Y")
-        )
+with col2:
+    st.image(qr_img, width=250)
 
-        try:
-            data = pd.to_datetime(data_str, dayfirst=True)
-        except:
-            st.error("❌ Data inválida! Use o formato DD/MM/AAAA")
-            st.stop()
+# TEXTO ABAIXO CENTRALIZADO
 
-        tipo = st.selectbox("tipo", ["Receita", "Despesa"])
+st.markdown(
+    "<p style='text-align:center; font-size:16px;'>Ou use a chave PIX:</p>",
+    unsafe_allow_html=True,
+)
 
-    with col2:
-        categoria = st.selectbox("categoria", categorias[tipo])
-        valor = st.number_input("valor", min_value=0.0, format="%.2f")
-        descricao = st.text_input("Descrição")
+st.markdown(
+    "<p style='text-align:center; font-size:18px; font-weight:bold;'>wilmeschaves@gmail.com</p>",
+    unsafe_allow_html=True,
+)
+# =================================
 
-        forma_pagamento = None
-        if tipo == "Despesa" or tipo == "Receita":
-            forma_pagamento = st.selectbox(
-                "Forma de pagamento/Recebimento",
-                [
-                    "Dinheiro",
-                    "Pix",
-                    "Cartão de Débito",
-                    "Cartão de Crédito",
-                    "Crédito em Conta" "Empréstimo",
-                ],
-            )
 
-        # 👇 BOTÃO FORA DAS COLUNAS
-        st.divider()
+# 1️⃣ cria tabelas
+criar_tabelas()
 
-    if st.button("💾 Salvar"):
-        salvar_lancamento(
-            data.strftime("%Y-%m-%d"),
-            tipo,
-            categoria,
-            descricao,
-            valor,
-            forma_pagamento,
-        )
 
-        st.success("✅ Lançamento salvo!")
-        st.rerun()
+# 2️⃣ ajusta banco (ALTER TABLE)
+# adicionar_coluna_tipo_usuario()
+adicionar_coluna_feedback()
 
-    st.subheader("📋 Histórico")
+# SESSION
+if "logado" not in st.session_state:
+    st.session_state.logado = False
 
-    if not df.empty:
-        df_exibir = df.copy()
-        df_exibir["data"] = df_exibir["data"].dt.strftime("%d/%m/%Y")
+if "usuario_id" not in st.session_state:
+    st.session_state.usuario_id = None
 
-        st.dataframe(df_exibir, use_container_width=True)
+if "tipo_usuario" not in st.session_state:
+    st.session_state.tipo_usuario = "usuario"
 
-        # ---------------
-        st.divider()
-        st.subheader("🗑️ Excluir Lançamento")
 
-        st.write("Selecione o lançamento para excluir:")
+def tela_login():
+    st.title("🔐 Login")
 
-        df_exibir["label"] = df_exibir.apply(
-            lambda row: f"{row['data']} | {row['categoria']} | {row['valor']:.2f}",
-            axis=1,
-        )
+    user = st.text_input("Usuário")
+    senha = st.text_input("Senha", type="password")
 
-        selecao = st.selectbox(
-            "Escolha o lançamento",
-            df_exibir["id"],
-            format_func=lambda x: df_exibir[df_exibir["id"] == x]["label"].values[0],
-        )
+    if st.button("Entrar"):
+        result = login(user, senha)
 
-        if st.button("Excluir"):
-            excluir_lancamento(selecao)
-            st.success("✅ Lançamento excluído!")
+        if result:
+            st.session_state.logado = True
+            st.session_state.usuario_id = result[0]
+            st.session_state.tipo_usuario = result[1]
             st.rerun()
-
-        # =======================================
-        st.subheader("✏️ Editar Lançamento")
-
-        if not df.empty:
-
-            df_edit = df.copy()
-
-            df_edit["label"] = df_edit.apply(
-                lambda row: f"{row['data'].strftime('%d/%m/%Y')} | {row['categoria']} | R$ {row['valor']:.2f}",
-                axis=1,
-            )
-
-            lancamento_id = st.selectbox(
-                "Selecione o lançamento",
-                df_edit["id"],
-                format_func=lambda x: df_edit[df_edit["id"] == x]["label"].values[0],
-            )
-
-            lancamento = df_edit[df_edit["id"] == lancamento_id].iloc[0]
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                nova_data = st.text_input(
-                    "Data", lancamento["data"].strftime("%d/%m/%Y")
-                )
-
-                novo_tipo = st.selectbox(
-                    "Tipo",
-                    ["Receita", "Despesa"],
-                    index=0 if lancamento["tipo"] == "Receita" else 1,
-                )
-
-                nova_categoria = st.text_input("Categoria", lancamento["categoria"])
-
-            with col2:
-                novo_valor = st.number_input("Valor", value=float(lancamento["valor"]))
-
-                nova_descricao = st.text_input("Descrição", lancamento["descricao"])
-                # ==================================
-                opcoes_pagamento = [
-                    "Dinheiro",
-                    "Pix",
-                    "Cartão de Débito",
-                    "Cartão de Crédito",
-                    "Crédito em Conta",
-                ]
-
-                valor_atual = lancamento["forma_pagamento"]
-
-                # garante valor válido mesmo se for None ou vazio
-                if valor_atual not in opcoes_pagamento:
-                    valor_atual = opcoes_pagamento[0]
-
-                nova_forma = st.selectbox(
-                    "Forma de pagamento",
-                    opcoes_pagamento,
-                    index=opcoes_pagamento.index(valor_atual),
-                )
-                # ==================================
-            if st.button("💾 Atualizar Lançamento"):
-
-                try:
-                    nova_data = st.date_input("Data", value=lancamento["data"].date())
-
-                    data_final = nova_data.strftime("%Y-%m-%d")
-                    atualizar_lancamento(
-                        lancamento_id,
-                        data_final,
-                        novo_tipo,
-                        nova_categoria,
-                        nova_descricao,
-                        novo_valor,
-                        nova_forma,
-                    )
-
-                    st.success("✅ Lançamento atualizado com sucesso!")
-                    st.rerun()
-
-                except:
-                    # st.error("❌ Data inválida! Use DD/MM/AAAA")
-                    pass
-        # =======================================
+        else:
+            st.error("Login inválido")
 
 
-# =========================
-# RESUMO
-# =========================
+def tela_cadastro():
+    st.title("🆕 Cadastro")
 
-elif menu == "Resumo":
+    user = st.text_input("Usuário")
+    senha = st.text_input("Senha", type="password")
 
-    st.subheader("📊 Resumo")
+    if st.button("Cadastrar"):
+        if cadastrar(user, senha):
+            st.success("Usuário criado!")
+        else:
+            st.error("Usuário já existe")
 
-    # 🔥 FILTRO AQUI (logo abaixo do título)
-    col1, col2 = st.columns(2)
 
-    meses = {
-        1: "Janeiro",
-        2: "Fevereiro",
-        3: "Março",
-        4: "Abril",
-        5: "Maio",
-        6: "Junho",
-        7: "Julho",
-        8: "Agosto",
-        9: "Setembro",
-        10: "Outubro",
-        11: "Novembro",
-        12: "Dezembro",
-    }
+# LOGIN FLOW
+if not st.session_state.logado:
+    opcao = st.radio("Escolha", ["Login", "Cadastrar"])
 
-    mes_num = col1.selectbox(
-        "Mês",
-        list(meses.keys()),
-        format_func=lambda x: meses[x],
-        index=datetime.today().month - 1,
-    )
+    if opcao == "Login":
+        tela_login()
+    else:
+        tela_cadastro()
 
-    ano = col2.selectbox(
-        "Ano",
-        list(range(2020, datetime.today().year + 5)),
-        index=datetime.today().year - 2020,
-    )
+    st.stop()
 
-    # 🔽 DEPOIS vem os cálculos
-    df["data"] = pd.to_datetime(df["data"], errors="coerce")
-
-    df_filtrado = df[(df["data"].dt.month == mes_num) & (df["data"].dt.year == ano)]
-    df_filtrado = df_filtrado.copy()
-    categorias_unicas = ["Todas"] + sorted(df_filtrado["categoria"].dropna().unique())
-    categoria_filtro = st.selectbox("Filtrar por categoria", categorias_unicas)
-
-    # 👇 AQUI ENTRA O df_exibir
-
-    # df_exibir = df_filtrado.copy()
-
-    if categoria_filtro != "Todas":
-        df_filtrado = df_filtrado[df_filtrado["categoria"] == categoria_filtro]
-
-    df_exibir = df_filtrado.copy()
-
-    df_exibir["valor"] = df_exibir.apply(
-        lambda row: valor_colorido(row["valor"], row["tipo"]), axis=1
-    )
-
-    df_exibir["data"] = df_exibir["data"].dt.strftime("%d/%m/%Y")
-
-    # 👇 MOSTRA FORMATADO
-    st.write(df_exibir.to_html(escape=False, index=False), unsafe_allow_html=True)
-
-    st.write("Linhas filtradas:", len(df_filtrado))
-    receitas = df_filtrado[df_filtrado["tipo"] == "Receita"]["valor"].sum()
-    despesas = df_filtrado[df_filtrado["tipo"] == "Despesa"]["valor"].sum()
-    saldo = receitas - despesas
-
-    st.markdown(
-        f"""
-    💰 Receitas: <span style='color:{cor_valor(receitas)}; font-size:20px'>
-    {moeda_br(receitas)}
-    </span>
-    """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        f"""
-    💸 Despesas: <span style='color:{cor_valor(despesas)}; font-size:20px'>
-    {moeda_br(despesas)}
-    </span>
-    """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        f"""
-    📊 Saldo: <span style='color:{cor_valor(saldo)}; font-size:22px; font-weight:bold'>
-    {moeda_br(saldo)}
-    </span>
-    """,
-        unsafe_allow_html=True,
-    )
+if st.session_state.tipo_usuario == "usuario":
 
     st.divider()
-    st.subheader("📥 Exportar")
+    st.subheader("😊 Avalie o aplicativo")
 
-    buffer = io.BytesIO()
-    df_filtrado.to_excel(buffer, index=False, engine="openpyxl")
-    buffer.seek(0)
+    opcoes = {"😡 Ruim": "ruim", "🙂 Bom": "bom", "😄 Ótimo": "otimo"}
 
-    st.download_button(
-        label="📊 Baixar Excel do mês",
-        data=buffer,
-        file_name=f"financeiro_{mes_num}_{ano}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-# =========================
-# ANÁLISE
-# =========================
-elif menu == "Análise":
+    escolha = st.radio("Sua experiência:", list(opcoes.keys()))
 
-    st.subheader("📈 Para onde vai seu dinheiro")
+    if st.button("Enviar Avaliação"):
 
-    if not df.empty:
-        despesas_df = df[df["tipo"] == "Despesa"]
+        conn = conectar()
+        cursor = conn.cursor()
 
-        if not despesas_df.empty:
-            resumo = despesas_df.groupby("categoria")["valor"].sum()
+        cursor.execute(
+            "UPDATE usuarios SET satisfacao = ? WHERE id = ?",
+            (opcoes[escolha], st.session_state.usuario_id),
+        )
 
-            chart = (
-                alt.Chart(resumo.reset_index())
-                .mark_bar(color="#6BAED6")  # azul suave
-                .encode(x="categoria", y="valor")
-            )
+        conn.commit()
+        conn.close()
 
-            st.altair_chart(chart, use_container_width=True)
+        st.success("Obrigado pelo feedback! 🙌")
 
-        else:
-            st.warning("Sem despesas cadastradas.")
+# MENU
+menu = ["Lançamentos", "Resumo", "Análise", "Metas"]
 
-# =========================
-# METAS
-# =========================
-elif menu == "Metas":
+if st.session_state.tipo_usuario == "admin":
+    menu.append("Admin")
 
-    st.subheader("🎯 Meta de Economia")
+escolha = st.sidebar.selectbox("Menu", menu)
 
-    meta = st.number_input("Meta mensal (R$)", min_value=0.0)
+if st.sidebar.button("Sair"):
+    st.session_state.clear()
+    st.rerun()
+# ========================
 
-    if not df.empty:
-        receitas = df[df["tipo"] == "Receita"]["valor"].sum()
-        despesas = df[df["tipo"] == "Despesa"]["valor"].sum()
-        saldo = receitas - despesas
+# =================================
+# ROTAS
+if escolha == "Lançamentos":
+    from pages.lancamentos import render
 
-        st.write(f"Saldo atual: R$ {saldo:,.2f}")
+    render()
 
-        if saldo >= meta:
-            st.success("🎉 Meta atingida!")
-        else:
-            st.warning("Continue economizando!")
+elif escolha == "Resumo":
+    from pages.resumo import render
+
+    render()
+
+elif escolha == "Análise":
+    from pages.analise import render
+
+    render()
+
+elif escolha == "Metas":
+    from pages.metas import render
+
+    render()
+
+elif escolha == "Admin":
+    from pages.admin import render
+
+    render()
